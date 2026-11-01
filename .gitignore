@@ -1,0 +1,6 @@
+chrome_bot/
+fb_downloads/
+secrets.env
+credentials.json
+__pycache__/
+seen.json
