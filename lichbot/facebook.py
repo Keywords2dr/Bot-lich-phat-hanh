@@ -76,12 +76,20 @@ class FacebookSession:
         self._page = page
         self._ctx = context
         self._debug_dir = debug_dir
+        self._photo_cache = {}
+        self._list_cache = {}
+        self._last_url = None
 
     def goto(self, url, wait=(5, 7)):
+        self._last_url = url
+        if any(k[0] == url for k in self._list_cache):
+            return
         self._page.goto(url, wait_until="domcontentloaded")
         pause(*wait)
 
     def require_login(self):
+        if self._last_url and any(k[0] == self._last_url for k in self._list_cache):
+            return
         if self._page.locator('input[name="pass"]').count():
             raise LoginError(LOGIN_MSG)
 
@@ -99,6 +107,10 @@ class FacebookSession:
         return self._page.evaluate(BIG_LINKS_JS)
 
     def gather_photos(self, picker, rounds, limit=None, stable_rounds=0, step=900):
+        cache_key = (self._last_url, rounds, limit, stable_rounds)
+        if self._last_url and cache_key in self._list_cache:
+            return list(self._list_cache[cache_key])
+
         photos = {}
         stable = 0
         for _ in range(rounds):
@@ -113,7 +125,10 @@ class FacebookSession:
             if stable_rounds and stable >= stable_rounds:
                 break
             self.scroll(step)
-        return list(photos.values())
+        result = list(photos.values())
+        if self._last_url:
+            self._list_cache[cache_key] = result
+        return result
 
     def featured_links(self):
         return self._page.evaluate(FEATURED_LINKS_JS)
@@ -127,10 +142,18 @@ class FacebookSession:
     def screenshot(self, name):
         self._debug_dir.mkdir(parents=True, exist_ok=True)
         path = self._debug_dir / name
-        self._page.screenshot(path=str(path))
+        try:
+            self._page.screenshot(path=str(path), timeout=8000)
+        except Exception as err:
+            print(f"Bo qua chup man hinh debug ({type(err).__name__})")
         return path
 
     def open_photo(self, href):
+        m = FBID_RE.search(href)
+        cache_key = m.group(1) if m else href
+        if cache_key in self._photo_cache:
+            return self._photo_cache[cache_key]
+
         page = self._page
         page.goto(href, wait_until="domcontentloaded")
         try:
@@ -142,13 +165,14 @@ class FacebookSession:
         text = fold(page.inner_text("body"))
         images = page.evaluate(IMAGES_JS)
         if not images:
+            self._photo_cache[cache_key] = None
             return None
         images.sort(key=lambda i: i["w"] * i["h"], reverse=True)
         best = images[0]
         response = self._ctx.request.get(best["src"])
         content_type = response.headers.get("content-type", "image/jpeg")
         ext = "png" if "png" in content_type else "webp" if "webp" in content_type else "jpg"
-        return PhotoPage(
+        result = PhotoPage(
             text=text,
             months=tuple(extract_months(text)),
             data=response.body(),
@@ -156,6 +180,8 @@ class FacebookSession:
             width=best["w"],
             height=best["h"],
         )
+        self._photo_cache[cache_key] = result
+        return result
 
 
 @contextmanager

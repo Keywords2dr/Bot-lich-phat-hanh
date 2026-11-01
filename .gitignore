@@ -6,3 +6,5 @@ __pycache__/
 seen.json
 .pytest_cache/
 *.pyc
+.pytest_cache/
+*.pyc
