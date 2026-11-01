@@ -4,3 +4,5 @@ secrets.env
 credentials.json
 __pycache__/
 seen.json
+.pytest_cache/
+*.pyc
