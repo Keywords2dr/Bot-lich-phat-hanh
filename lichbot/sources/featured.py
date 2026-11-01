@@ -1,12 +1,20 @@
 import re
 
 from ..facebook import FBID_RE
-from ..text_utils import dominant, has_all, parse_target, resolve_year
+from ..policy import parse_target
+from ..text_utils import has_all, identify_photo_month, resolve_year
 from .base import PosterSource
 
 
 class FeaturedSource(PosterSource):
     kind = "featured"
+
+    def supports(self, target):
+        want = parse_target(target)
+        if not want:
+            return True
+        months_ago = (self._today.year - want[0]) * 12 + (self._today.month - want[1])
+        return months_ago < 2
 
     def fetch(self, target):
         fb = self._fb
@@ -27,7 +35,7 @@ class FeaturedSource(PosterSource):
         candidates = []
         for i, href in enumerate(links, 1):
             page = fb.open_photo(href)
-            month = dominant(page.months) if page else None
+            month = identify_photo_month(page.text, page.months) if page else None
             if not month:
                 print(f"Bai {i}: bo qua (khong nhan ra thang)")
                 continue
@@ -59,11 +67,9 @@ class FeaturedSource(PosterSource):
         fb.goto(href, wait=(3, 5))
         for photo_href in fb.thumb_links()[:2]:
             better = fb.open_photo(photo_href)
-            if (
-                better
-                and better.width > page.width
-                and has_all(better.text, keys)
-                and dominant(better.months) == month
-            ):
+            if not better or better.width <= page.width:
+                continue
+            better_month = identify_photo_month(better.text, better.months)
+            if has_all(better.text, keys) and better_month == month:
                 return better
         return page

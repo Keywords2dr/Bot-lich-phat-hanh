@@ -1,4 +1,12 @@
 from dataclasses import dataclass
+from enum import Enum
+
+
+class RunStatus(str, Enum):
+    SUCCESS = "SUCCESS"
+    NOT_PUBLISHED = "NOT_PUBLISHED"
+    NOT_FOUND = "NOT_FOUND"
+    ERROR = "ERROR"
 
 
 class BotError(Exception):
@@ -47,5 +55,10 @@ class Poster:
 @dataclass(frozen=True)
 class RunResult:
     publisher: str
-    ok: bool
+    target: str | None
+    status: RunStatus
     message: str
+
+    @property
+    def ok(self):
+        return self.status == RunStatus.SUCCESS

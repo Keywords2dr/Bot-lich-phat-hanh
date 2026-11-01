@@ -1,3 +1,4 @@
+import hashlib
 import time
 from abc import ABC, abstractmethod
 
@@ -44,7 +45,7 @@ class LocalStore(PosterStore):
 
 class DriveStore(PosterStore):
     def __init__(self, root_folder, attempts=3, delay=8, sleep=time.sleep):
-        from drive import get_service
+        from .google_drive import get_service
 
         self._service = get_service()
         self._root_name = root_folder
@@ -61,7 +62,7 @@ class DriveStore(PosterStore):
         )
 
     def _save_once(self, publisher, poster):
-        from drive import get_or_create_folder, upload
+        from .google_drive import get_or_create_folder, upload
 
         root = get_or_create_folder(self._service, self._root_name)
         publisher_folder = get_or_create_folder(self._service, publisher, root)
@@ -74,3 +75,23 @@ class DriveStore(PosterStore):
         result = upload(self._service, folder, name, poster.data, poster.mime)
         print("OK:", result["webViewLink"])
         return f"da upload: {poster.period}"
+
+
+class DedupStore(PosterStore):
+    """Khử trùng ảnh (ví dụ lịch gộp Tháng 1 & 2) cho mọi Store."""
+
+    def __init__(self, inner):
+        self._inner = inner
+        self._saved_hashes = {}
+
+    def save(self, publisher, poster):
+        digest = hashlib.sha256(poster.data).hexdigest()
+        key = (publisher, digest)
+        if key in self._saved_hashes:
+            prev = self._saved_hashes[key]
+            msg = f"lich gop chung voi {prev} (bo qua luu trung)"
+            print(f"-> Phat hien lich gop: {poster.period} trung anh voi {prev}, bo qua!")
+            return msg
+        res = self._inner.save(publisher, poster)
+        self._saved_hashes[key] = poster.period
+        return res

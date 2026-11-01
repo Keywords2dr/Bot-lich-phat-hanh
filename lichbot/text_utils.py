@@ -2,21 +2,22 @@ import re
 import unicodedata
 from collections import Counter
 
-# Bắt chữ "tháng X" nhưng KHÔNG đứng sau một con số (loại trừ ngày đăng "28 tháng 9", "27 tháng 8, 2025")
-MONTH_RE = re.compile(r"(?<![0-9])(?<![0-9]\s)thang\s*0?(\d{1,2})(?!\d)")
-# Bắt cụm tiêu đề chuẩn của các NXB (Kim Đồng, IPM, Trẻ)
-TITLE_MONTH_RE = re.compile(
-    r"(?:lich\s+phat\s+hanh|sach\s+moi|phat\s+hanh\s+du\s+kien|manga\s*[-–]?\s*comic|comic|don\s+chao|chao\s+don)"
-    r"[^.\n]{0,30}?thang\s*0?(\d{1,2})(?!\d)"
-)
-# Nhận diện lịch gộp Tết: "tháng 1 & 2", "tháng 1 - 2", "tháng 01 + 02", "tháng 1 và tháng 2"
-MERGED_JAN_FEB_RE = re.compile(
-    r"thang\s*0?1\s*(?:&|\+|va|[-–/])\s*(?:thang\s*)?0?2(?!\d)"
-)
-PAIR_RE = re.compile(r"thang\s*0?(\d{1,2})\s*[-–.,/]?\s*(20\d\d)")
-POST_DATE_YEAR_RE = re.compile(r"\b\d{1,2}\s+thang\s*0?(\d{1,2})\s*(?:,|nam)?\s*(20\d\d)")
-POST_DATE_ANY_RE = re.compile(r"\b\d{1,2}\s+thang\s*0?\d{1,2}(?!\d)(?:\s*,?\s*20\d\d)?")
-YEAR_RE = re.compile(r"(?<!\d)(20\d\d)(?!\d)")
+from .policy import parse_target
+
+# Bắt các tiêu đề lịch phát hành cụ thể
+TITLE_PATTERNS = [
+    re.compile(r"(?:lich\s+phat\s+hanh|sach\s+moi|phat\s+hanh\s+du\s+kien)[^.\n\r]{0,35}?thang\s*0?(\d{1,2})(?!\d)"),
+    re.compile(r"(?:manga\s*[-–]?\s*comic|comic|don\s+chao|chao\s+don)[^.\n\r]{0,35}?thang\s*0?(\d{1,2})(?!\d)"),
+]
+
+# Nhận diện lịch gộp Tết
+MERGED_RE = re.compile(r"thang\s*0?1\s*(?:&|\+|va|[-–/])\s*(?:thang\s*)?0?2(?!\d)")
+
+# Tách riêng cụm ngày đăng của FB (chỉ lọc khi có số ngày + chữ tháng rõ ràng như "28 tháng 9")
+FB_POST_DATE_RE = re.compile(r"\b(?:ngay\s*)?\d{1,2}\s+thang\s*0?(\d{1,2})(?:\s*,?\s*(20\d\d))?")
+MONTH_WORD_RE = re.compile(r"\bthang\s*0?(\d{1,2})(?!\d)")
+PAIR_RE = re.compile(r"\bthang\s*0?(\d{1,2})\s*[-–.,/]?\s*(20\d\d)\b")
+YEAR_RE = re.compile(r"\b(20\d\d)\b")
 
 
 def fold(text):
@@ -25,32 +26,58 @@ def fold(text):
 
 
 def is_merged_jan_feb(text, months=()):
-    if MERGED_JAN_FEB_RE.search(text):
+    if MERGED_RE.search(text):
         return True
     s = set(months)
     return 1 in s and 2 in s and len(s - {1, 2, 12}) == 0
 
 
+def find_title_month(text):
+    for pattern in TITLE_PATTERNS:
+        match = pattern.search(text)
+        if match:
+            m = int(match.group(1))
+            if 1 <= m <= 12:
+                return m
+    return None
+
+
 def extract_months(text):
-    cleaned = POST_DATE_ANY_RE.sub(" ", text)
-    months = [int(m) for m in MONTH_RE.findall(cleaned) if 1 <= int(m) <= 12]
-    titled = [int(m) for m in TITLE_MONTH_RE.findall(cleaned) if 1 <= int(m) <= 12]
-    if titled and months:
-        target_m = titled[0]
-        # Đảm bảo tháng nằm trong tiêu đề ("Lịch phát hành... tháng X") luôn đứng đầu khi gọi dominant()
-        top_m, top_count = Counter(months).most_common(1)[0]
-        if top_m != target_m:
-            need = top_count - months.count(target_m) + 1
-            return [target_m] * need + months
-    return months
+    """Trích xuất các tháng thực tế xuất hiện trong văn bản mà không bịa thêm tần suất.
+    Đồng thời không nuốt chữ dạng 'thang 9 thang 10' hay 'lich phat hanh 2026 thang 11'."""
+    # Bóc tách bằng cách mask ngày đăng để tránh '28 thang 9' biến thành tháng lịch
+    masked_text = text
+    for match in FB_POST_DATE_RE.finditer(text):
+        start, end = match.span()
+        # Chỉ mask nếu phía trước là khoảng trắng/đầu dòng (ngày thật)
+        prefix = text[:start].strip()
+        if not prefix.endswith("thang"):
+            masked_text = masked_text[:start] + (" " * (end - start)) + masked_text[end:]
+
+    found = [int(m) for m in MONTH_WORD_RE.findall(masked_text) if 1 <= int(m) <= 12]
+    title_m = find_title_month(text)
+    if title_m and title_m not in found:
+        found.insert(0, title_m)
+    return found
 
 
 def dominant(values):
     return Counter(values).most_common(1)[0][0] if values else None
 
 
+def identify_photo_month(text, months):
+    """Ưu tiên số 1 cho tiêu đề bài viết, nếu không có mới dùng tần suất thống kê."""
+    title_m = find_title_month(text)
+    if title_m:
+        return title_m
+    return dominant(months)
+
+
 def explicit_year(text, month):
-    post_dates = [(int(m), int(y)) for m, y in POST_DATE_YEAR_RE.findall(text) if 1 <= int(m) <= 12]
+    post_dates = [
+        (int(m), int(y)) for m, y in FB_POST_DATE_RE.findall(text)
+        if y and 1 <= int(m) <= 12
+    ]
     if post_dates and month:
         inferred = []
         for post_m, post_y in post_dates:
@@ -67,12 +94,10 @@ def explicit_year(text, month):
     if exact:
         return dominant(exact)
     if pairs and month:
-        inferred = []
-        for post_m, post_y in pairs:
-            if post_m >= 11 and month <= 2:
-                inferred.append(post_y + 1)
-            else:
-                inferred.append(post_y)
+        inferred = [
+            post_y + 1 if post_m >= 11 and month <= 2 else post_y
+            for post_m, post_y in pairs
+        ]
         return dominant(inferred)
 
     cleaned = re.sub(r"#\w+", "", text)
@@ -87,23 +112,28 @@ def nearest_year(month, today):
 
 
 def schedule_year(text, month, today):
+    from .policy import max_available_period
     found = explicit_year(text, month)
     if found:
         return found
-    max_future = 1 if today.day >= 20 else 0
-    if today.month == 12 and month == 1 and max_future:
+    max_y, max_m = max_available_period(today)
+    if (today.year + 1, month) <= (max_y, max_m):
         return today.year + 1
-    if month <= today.month + max_future:
+    if (today.year, month) <= (max_y, max_m):
         return today.year
     return today.year - 1
 
 
+YEAR_STRATEGIES = {
+    "explicit": lambda t, m, today: explicit_year(t, m) or nearest_year(m, today),
+    "nearest": lambda t, m, today: nearest_year(m, today),
+    "schedule": schedule_year,
+}
+
+
 def resolve_year(text, month, mode, today):
-    if mode == "nearest":
-        return nearest_year(month, today)
-    if mode == "schedule":
-        return schedule_year(text, month, today)
-    return explicit_year(text, month) or nearest_year(month, today)
+    strategy = YEAR_STRATEGIES.get(mode, YEAR_STRATEGIES["explicit"])
+    return strategy(text, month, today)
 
 
 def month_matches(found, want):
@@ -112,10 +142,3 @@ def month_matches(found, want):
 
 def has_all(text, keys):
     return all(fold(key) in text for key in keys)
-
-
-def parse_target(target):
-    if not target:
-        return None
-    year, month = re.split(r"[-/]", target.strip())
-    return int(year), int(month)

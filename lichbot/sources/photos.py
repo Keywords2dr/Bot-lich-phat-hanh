@@ -1,6 +1,7 @@
 import re
 
-from ..text_utils import dominant, has_all, parse_target, resolve_year
+from ..policy import parse_target
+from ..text_utils import has_all, identify_photo_month, resolve_year
 from .base import PosterSource
 
 
@@ -11,29 +12,21 @@ class PhotosSource(PosterSource):
         fb = self._fb
         want = parse_target(target)
         url = self._opts.get("url") or f"https://www.facebook.com/{self._publisher.slug}/photos"
-        state_map = getattr(fb, "_photos_scan_state", None)
-        if state_map is None:
-            state_map = {}
-            try:
-                setattr(fb, "_photos_scan_state", state_map)
-            except Exception:
-                state_map = None
+        state = self._ctx.get_photos_state(url) if self._ctx else None
 
-        state = state_map.get(url) if state_map is not None else None
         if state and want and want in state["found"]:
             page = state["found"][want]
             print(f"-> Lay ngay lich thang {want[1]} nam {want[0]} da quet san trong bo nho!")
             return self._poster(want[0], want[1], page)
 
-        links = state["links"] if state else self._collect_links()
+        links = state["links"] if state and state["links"] else self._collect_links()
         if not links:
             shot = fb.screenshot(f"debug_photos_{self._publisher.name}.png")
             print("Khong thay anh nao trong album. Da chup man hinh:", shot)
             return None
 
-        if state_map is not None and not state:
-            state = {"links": links, "next_idx": 0, "found": {}}
-            state_map[url] = state
+        if state and not state["links"]:
+            state["links"] = links
 
         keys = self._opts.get("required_keys", [])
         mode = self._opts.get("year_mode", "explicit")
@@ -47,7 +40,7 @@ class PhotosSource(PosterSource):
             if state:
                 state["next_idx"] = idx + 1
             page = fb.open_photo(href)
-            month = dominant(page.months) if page else None
+            month = identify_photo_month(page.text, page.months) if page else None
             if not month:
                 print(f"Anh {i}: bo qua (khong nhan ra thang)")
                 continue
