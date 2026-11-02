@@ -1,20 +1,25 @@
+import io
 import re
 import unicodedata
 from collections import Counter
 
 from .policy import parse_target
 
-# Bắt các tiêu đề lịch phát hành cụ thể
 TITLE_PATTERNS = [
     re.compile(r"(?:lich\s+phat\s+hanh|sach\s+moi|phat\s+hanh\s+du\s+kien)[^.\n\r]{0,35}?thang\s*0?(\d{1,2})(?!\d)"),
-    re.compile(r"(?:manga\s*[-–]?\s*comic|comic|don\s+chao|chao\s+don)[^.\n\r]{0,35}?thang\s*0?(\d{1,2})(?!\d)"),
+    re.compile(r"(?:manga\s*[-–]?\s*comic|comic|don\s+chao|chao\s+don|chao|tieu\s+diem)[^.\n\r]{0,35}?thang\s*0?(\d{1,2})(?!\d)"),
 ]
 
-# Nhận diện lịch gộp Tết
+COMMENT_SPLIT_RE = re.compile(
+    r"\b(?:phu\s+hop\s+nhat|tat\s+ca\s+binh\s+luan|binh\s+luan\s+lien\s+quan|viet\s+binh\s+luan|most\s+relevant)\b"
+)
+PROMO_RE = re.compile(
+    r"\b(?:dai\s+tiec|freeship|flash\s*sale|giam\s+gia|gio\s+vang|mua\s+\d+\s+tang\s+\d+|hoi\s+sach|voucher|uu\s+dai|khuyen\s+mai|chao\s+he)\b"
+)
 MERGED_RE = re.compile(r"thang\s*0?1\s*(?:&|\+|va|[-–/])\s*(?:thang\s*)?0?2(?!\d)")
-
-# Tách riêng cụm ngày đăng của FB (chỉ lọc khi có số ngày + chữ tháng rõ ràng như "28 tháng 9")
 FB_POST_DATE_RE = re.compile(r"\b(?:ngay\s*)?\d{1,2}\s+thang\s*0?(\d{1,2})(?:\s*,?\s*(20\d\d))?")
+FB_FULL_DATE_RE = re.compile(r"\b(?:ngay\s*)?(\d{1,2})\s+thang\s*0?(\d{1,2})(?:\s*,?\s*(20\d\d))?")
+RELATIVE_TIME_RE = re.compile(r"\b\d+\s*(?:gio|phut|ngay)\b")
 MONTH_WORD_RE = re.compile(r"\bthang\s*0?(\d{1,2})(?!\d)")
 PAIR_RE = re.compile(r"\bthang\s*0?(\d{1,2})\s*[-–.,/]?\s*(20\d\d)\b")
 YEAR_RE = re.compile(r"\b(20\d\d)\b")
@@ -25,16 +30,23 @@ def fold(text):
     return "".join(c for c in text if unicodedata.category(c) != "Mn").lower()
 
 
+def strip_comments(text):
+    parts = COMMENT_SPLIT_RE.split(text, maxsplit=1)
+    return parts[0] if parts else text
+
+
 def is_merged_jan_feb(text, months=()):
-    if MERGED_RE.search(text):
+    caption = strip_comments(text)
+    if MERGED_RE.search(caption):
         return True
     s = set(months)
     return 1 in s and 2 in s and len(s - {1, 2, 12}) == 0
 
 
 def find_title_month(text):
+    caption = strip_comments(text)
     for pattern in TITLE_PATTERNS:
-        match = pattern.search(text)
+        match = pattern.search(caption)
         if match:
             m = int(match.group(1))
             if 1 <= m <= 12:
@@ -42,20 +54,59 @@ def find_title_month(text):
     return None
 
 
+def ocr_image_month(img_bytes):
+    try:
+        from PIL import Image
+        import pytesseract
+
+        img = Image.open(io.BytesIO(img_bytes))
+        w, h = img.size
+        crop_box = img.crop((0, 0, int(w * 0.75), int(h * 0.65)))
+        text = fold(pytesseract.image_to_string(crop_box, lang="vie+eng"))
+        if PROMO_RE.search(text):
+            return None
+        m = find_title_month(text)
+        if m:
+            return m
+        extracted = [int(x) for x in MONTH_WORD_RE.findall(text) if 1 <= int(x) <= 12]
+        if extracted:
+            return extracted[0]
+    except Exception:
+        pass
+    return None
+
+
+def infer_month_from_post_date(text, today=None):
+    caption = strip_comments(text)
+    if PROMO_RE.search(caption):
+        return None
+    for d_str, m_str, _ in FB_FULL_DATE_RE.findall(caption):
+        day, month = int(d_str), int(m_str)
+        if 1 <= day <= 31 and 1 <= month <= 12:
+            if day <= 21:
+                return month
+            if day >= 25:
+                return 1 if month == 12 else month + 1
+            return None
+    if today and RELATIVE_TIME_RE.search(caption):
+        if today.day <= 21:
+            return today.month
+        if today.day >= 25:
+            return 1 if today.month == 12 else today.month + 1
+    return None
+
+
 def extract_months(text):
-    """Trích xuất các tháng thực tế xuất hiện trong văn bản mà không bịa thêm tần suất.
-    Đồng thời không nuốt chữ dạng 'thang 9 thang 10' hay 'lich phat hanh 2026 thang 11'."""
-    # Bóc tách bằng cách mask ngày đăng để tránh '28 thang 9' biến thành tháng lịch
-    masked_text = text
-    for match in FB_POST_DATE_RE.finditer(text):
+    caption = strip_comments(text)
+    masked_text = caption
+    for match in FB_POST_DATE_RE.finditer(caption):
         start, end = match.span()
-        # Chỉ mask nếu phía trước là khoảng trắng/đầu dòng (ngày thật)
-        prefix = text[:start].strip()
+        prefix = caption[:start].strip()
         if not prefix.endswith("thang"):
             masked_text = masked_text[:start] + (" " * (end - start)) + masked_text[end:]
 
     found = [int(m) for m in MONTH_WORD_RE.findall(masked_text) if 1 <= int(m) <= 12]
-    title_m = find_title_month(text)
+    title_m = find_title_month(caption)
     if title_m and title_m not in found:
         found.insert(0, title_m)
     return found
@@ -65,17 +116,27 @@ def dominant(values):
     return Counter(values).most_common(1)[0][0] if values else None
 
 
-def identify_photo_month(text, months):
-    """Ưu tiên số 1 cho tiêu đề bài viết, nếu không có mới dùng tần suất thống kê."""
-    title_m = find_title_month(text)
+def identify_photo_month(text, months, img_bytes=None, today=None):
+    caption = strip_comments(text)
+    title_m = find_title_month(caption)
     if title_m:
         return title_m
-    return dominant(months)
+    if PROMO_RE.search(caption):
+        return None
+    m = dominant(months)
+    if m:
+        return m
+    if img_bytes:
+        ocr_m = ocr_image_month(img_bytes)
+        if ocr_m:
+            return ocr_m
+    return infer_month_from_post_date(caption, today=today)
 
 
 def explicit_year(text, month):
+    caption = strip_comments(text)
     post_dates = [
-        (int(m), int(y)) for m, y in FB_POST_DATE_RE.findall(text)
+        (int(m), int(y)) for m, y in FB_POST_DATE_RE.findall(caption)
         if y and 1 <= int(m) <= 12
     ]
     if post_dates and month:
@@ -89,7 +150,7 @@ def explicit_year(text, month):
                 inferred.append(post_y)
         return dominant(inferred)
 
-    pairs = [(int(m), int(y)) for m, y in PAIR_RE.findall(text) if 1 <= int(m) <= 12]
+    pairs = [(int(m), int(y)) for m, y in PAIR_RE.findall(caption) if 1 <= int(m) <= 12]
     exact = [y for m, y in pairs if m == month]
     if exact:
         return dominant(exact)
@@ -100,7 +161,7 @@ def explicit_year(text, month):
         ]
         return dominant(inferred)
 
-    cleaned = re.sub(r"#\w+", "", text)
+    cleaned = re.sub(r"#\w+", "", caption)
     years = [int(y) for y in YEAR_RE.findall(cleaned)]
     return dominant(years)
 

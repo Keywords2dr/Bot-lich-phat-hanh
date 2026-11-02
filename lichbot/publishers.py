@@ -4,6 +4,7 @@ KIM_DONG_HASHTAG = "https://www.facebook.com/hashtag/lich_phat_hanh_comick%C4%91
 IPM_ALBUM = "https://www.facebook.com/media/set/?set=a.452839023556014&type=3"
 IPM_HASHTAG = "https://www.facebook.com/hashtag/thang_nay_ipm_co_gi"
 TRE_HASHTAG = "https://www.facebook.com/hashtag/lichphathanh"
+AMAK_ALBUM = "https://www.facebook.com/media/set/?set=a.488898269917289&type=3"
 
 PUBLISHERS = (
     Publisher(
@@ -37,6 +38,7 @@ PUBLISHERS = (
                 "type": "hashtag",
                 "url": IPM_HASHTAG,
                 "text_key": "ipm",
+                "scan_limit": 30,
             },
         ),
     ),
@@ -47,6 +49,25 @@ PUBLISHERS = (
             {"type": "featured", "required_keys": ["lich phat hanh"]},
             {"type": "album", "keys": ["lich phat hanh"]},
             {"type": "hashtag", "url": TRE_HASHTAG, "text_key": "nxb tre"},
+        ),
+    ),
+    Publisher(
+        name="AMAK",
+        slug="Amak.vn",
+        sources=(
+            {
+                "type": "featured",
+                "required_keys": [],
+                "year_mode": "schedule",
+            },
+            {
+                "type": "photos",
+                "url": AMAK_ALBUM,
+                "order": "newest_first",
+                "required_keys": [],
+                "year_mode": "schedule",
+                "scan_limit": 100,
+            },
         ),
     ),
 )

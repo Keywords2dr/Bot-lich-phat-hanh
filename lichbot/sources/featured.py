@@ -35,7 +35,7 @@ class FeaturedSource(PosterSource):
         candidates = []
         for i, href in enumerate(links, 1):
             page = fb.open_photo(href)
-            month = identify_photo_month(page.text, page.months) if page else None
+            month = identify_photo_month(page.text, page.months, img_bytes=page.data) if page else None
             if not month:
                 print(f"Bai {i}: bo qua (khong nhan ra thang)")
                 continue
@@ -69,7 +69,7 @@ class FeaturedSource(PosterSource):
             better = fb.open_photo(photo_href)
             if not better or better.width <= page.width:
                 continue
-            better_month = identify_photo_month(better.text, better.months)
+            better_month = identify_photo_month(better.text, better.months, img_bytes=better.data)
             if has_all(better.text, keys) and better_month == month:
                 return better
         return page

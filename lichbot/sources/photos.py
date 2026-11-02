@@ -40,7 +40,11 @@ class PhotosSource(PosterSource):
             if state:
                 state["next_idx"] = idx + 1
             page = fb.open_photo(href)
-            month = identify_photo_month(page.text, page.months) if page else None
+            month = (
+                identify_photo_month(page.text, page.months, img_bytes=page.data, today=self._today)
+                if page
+                else None
+            )
             if not month:
                 print(f"Anh {i}: bo qua (khong nhan ra thang)")
                 continue
@@ -53,7 +57,14 @@ class PhotosSource(PosterSource):
                 f"Anh {i}: khop, thang {month} nam {year}",
                 "(cac thang thay trong trang:", sorted(set(page.months)), ")",
             )
-            if state and (year, month) not in state["found"]:
+
+            if not page.months:
+                better_page = self._find_better_in_cluster(links, idx, year, month, keys, mode)
+                if better_page is not None:
+                    print(f"-> Bo qua Anh {i} (khong co tieu de) vi phia sau co anh ghi ro thang {month}!")
+                    continue
+
+            if state and ((year, month) not in state["found"] or page.months):
                 state["found"][(year, month)] = page
 
             if not want or (month == want[1] and year == want[0]):
@@ -71,6 +82,25 @@ class PhotosSource(PosterSource):
                         break
                 else:
                     older_streak = 0
+        return None
+
+    def _find_better_in_cluster(self, links, cur_idx, year, month, keys, mode):
+        fb = self._fb
+        end = min(cur_idx + 4, len(links))
+        for next_idx in range(cur_idx + 1, end):
+            next_page = fb.open_photo(links[next_idx])
+            if not next_page or not has_all(next_page.text, keys):
+                continue
+            next_m = identify_photo_month(
+                next_page.text, next_page.months, img_bytes=next_page.data, today=self._today
+            )
+            if not next_m:
+                continue
+            next_y = resolve_year(next_page.text, next_m, mode, self._today)
+            if (next_y, next_m) == (year, month) and next_page.months:
+                return next_page
+            if next_y * 12 + next_m < year * 12 + month:
+                break
         return None
 
     def _collect_links(self):
