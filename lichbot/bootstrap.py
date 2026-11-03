@@ -27,7 +27,15 @@ def resolve_publishers(names):
     return [known[n.lower()] for n in names]
 
 
-def run_pipeline(publishers, targets=None, kinds=None, use_local=True, use_drive=True):
+def run_pipeline(
+    publishers,
+    targets=None,
+    kinds=None,
+    use_local=True,
+    use_drive=True,
+    should_stop=None,
+    on_chrome=None,
+):
     settings = Settings()
     load_env(settings.env_file)
     missing = missing_env(settings.required_env)
@@ -37,7 +45,9 @@ def run_pipeline(publishers, targets=None, kinds=None, use_local=True, use_drive
     stores = create_stores(settings, use_local, use_drive)
     context = ScanContext()
 
-    with ChromeLauncher(settings):
+    with ChromeLauncher(settings) as launcher:
+        if on_chrome:
+            on_chrome(launcher)
         with facebook_session(settings.debug_port, settings.output_dir) as fb:
-            runner = Runner(fb, stores, context=context)
+            runner = Runner(fb, stores, context=context, should_stop=should_stop)
             return runner.run(publishers, kinds=kinds, targets=targets)

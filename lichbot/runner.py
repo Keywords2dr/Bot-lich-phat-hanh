@@ -18,6 +18,7 @@ class Runner:
         sleep=time.sleep,
         source_factory=build_sources,
         context=None,
+        should_stop=None,
     ):
         self._session = session
         self._stores = stores
@@ -25,19 +26,40 @@ class Runner:
         self._sleep = sleep
         self._build_sources = source_factory
         self._ctx = context or ScanContext()
+        self._should_stop = should_stop or (lambda: False)
+
+    def _interruptible_sleep(self, seconds):
+        if self._sleep is not time.sleep:
+            self._sleep(seconds)
+            return
+        end_time = time.time() + seconds
+        while time.time() < end_time:
+            if self._should_stop():
+                break
+            time.sleep(min(0.25, max(0.0, end_time - time.time())))
 
     def run(self, publishers, target=None, kinds=None, targets=None):
         all_targets = targets if targets is not None else [target]
         results = []
 
         for index, publisher in enumerate(publishers):
+            if self._should_stop():
+                print("\n[DA HUY] Tien trinh da dung theo yeu cau nguoi dung.")
+                break
+
             if index > 0:
                 delay = random.uniform(10, 20)
                 print(f"\n[Nghi giua cac NXB: {delay:.1f}s de giu an toan tai khoan...]")
-                self._sleep(delay)
+                self._interruptible_sleep(delay)
+                if self._should_stop():
+                    print("\n[DA HUY] Da dung trong luc nghi giua cac NXB.")
+                    break
 
             print("\n=== " + publisher.name + " ===")
             for t in all_targets:
+                if self._should_stop():
+                    print(f"[DA HUY] Bo qua ky {t} do nguoi dung da bam dung.")
+                    break
                 try:
                     res = self._run_one(publisher, t, kinds)
                     results.append(res)
@@ -55,6 +77,9 @@ class Runner:
                     )
                     results.append(RunResult(publisher.name, t, status, msg))
                 except Exception as error:
+                    if self._should_stop():
+                        print("\n[DA HUY] Da ngat phien trinh duyet theo yeu cau.")
+                        return results
                     message = str(error).splitlines()[0][:200]
                     print("Loi:", message)
                     results.append(RunResult(publisher.name, t, RunStatus.ERROR, message))
@@ -103,6 +128,8 @@ class Runner:
         tried_kinds = []
 
         for source in sources:
+            if self._should_stop():
+                raise BotError("Da huy boi nguoi dung")
             supports_fn = getattr(source, "supports", None)
             if callable(supports_fn) and not supports_fn(target):
                 continue
