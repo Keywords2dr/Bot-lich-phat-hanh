@@ -8,3 +8,5 @@ seen.json
 *.pyc
 .pytest_cache/
 *.pyc
+fb_cookies.json
+fb_cookies.json
