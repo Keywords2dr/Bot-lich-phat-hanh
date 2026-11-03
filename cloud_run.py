@@ -1,5 +1,6 @@
 import json
 import os
+import subprocess
 import time
 from datetime import date
 from playwright.sync_api import sync_playwright
@@ -10,7 +11,7 @@ from lichbot.policy import max_available_period
 from lichbot.publishers import PUBLISHERS
 from lichbot.runner import Runner
 from lichbot.scan_context import ScanContext
-from lichbot.settings import Settings, load_env
+from lichbot.settings import Settings, load_env, missing_env
 
 
 def get_cloud_targets(today=None, lookback=2):
@@ -47,8 +48,24 @@ def normalize_cookies(raw_cookies):
     return valid
 
 
+def find_chromium_executable():
+    with sync_playwright() as p:
+        return p.chromium.executable_path
+
+
+def inject_cookies(debug_port, cookies):
+    with sync_playwright() as p:
+        browser = p.chromium.connect_over_cdp(f"http://127.0.0.1:{debug_port}")
+        ctx = browser.contexts[0] if browser.contexts else browser.new_context()
+        ctx.add_cookies(cookies)
+        page = ctx.pages[0] if ctx.pages else ctx.new_page()
+        page.goto("https://www.facebook.com", wait_until="domcontentloaded", timeout=60000)
+        time.sleep(3)
+
+
 def main():
     settings = Settings()
+    settings.output_dir.mkdir(parents=True, exist_ok=True)
     load_env(settings.env_file)
 
     raw_cookie_str = os.environ.get("FB_COOKIES", "").strip()
@@ -56,41 +73,45 @@ def main():
         raise RuntimeError("Thieu bien moi truong FB_COOKIES tren GitHub Secrets!")
 
     cookies = normalize_cookies(json.loads(raw_cookie_str))
-    stores = create_stores(settings, use_local=True, use_drive=True)
+    missing_drive_vars = missing_env(settings.required_env)
+    use_drive = len(missing_drive_vars) == 0
+
+    if not use_drive:
+        print(f"[Canh bao] Thieu bien Google Drive {missing_drive_vars} -> Chi luu vao GitHub Artifacts (fb_downloads).")
+
+    stores = create_stores(settings, use_local=True, use_drive=use_drive)
     context_state = ScanContext()
     targets = get_cloud_targets(lookback=2)
 
-    print(f"Khoi chay Cloud Runner | Cac ky kiem tra: {targets}")
+    chrome_bin = find_chromium_executable()
+    proc = subprocess.Popen(
+        [
+            chrome_bin,
+            "--headless=new",
+            f"--remote-debugging-port={settings.debug_port}",
+            "--user-data-dir=/tmp/chrome-cloud-profile",
+            "--no-sandbox",
+            "--disable-dev-shm-usage",
+            "--disable-blink-features=AutomationControlled",
+            "--window-size=1440,900",
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
 
-    with sync_playwright() as p:
-        browser = p.chromium.launch(
-            headless=True,
-            args=[
-                f"--remote-debugging-port={settings.debug_port}",
-                "--disable-blink-features=AutomationControlled",
-                "--no-sandbox",
-                "--disable-dev-shm-usage",
-            ],
-        )
-        ctx = browser.new_context(
-            viewport={"width": 1440, "height": 900},
-            locale="vi-VN",
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
-        )
-        ctx.add_cookies(cookies)
-        page = ctx.new_page()
-        page.goto("https://www.facebook.com", wait_until="domcontentloaded", timeout=60000)
+    try:
         time.sleep(3)
-
+        inject_cookies(settings.debug_port, cookies)
+        print(f"Khoi chay Cloud Runner | Luu Drive: {use_drive} | Cac ky: {targets}")
         with facebook_session(settings.debug_port, settings.output_dir) as fb:
             runner = Runner(fb, stores, context=context_state)
             results = runner.run(list(PUBLISHERS), targets=targets)
 
-        browser.close()
-
-    print("\n=== TONG KET CLOUD RUN ===")
-    for r in results:
-        print(f"{r.publisher:10} | {r.target} | {r.status.value:14} | {r.message}")
+        print("\n=== TONG KET CLOUD RUN ===")
+        for r in results:
+            print(f"{r.publisher:10} | {r.target} | {r.status.value:14} | {r.message}")
+    finally:
+        proc.terminate()
 
 
 if __name__ == "__main__":

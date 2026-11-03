@@ -2,9 +2,8 @@ name: Auto Monthly Manga Schedule
 
 on:
   schedule:
-    # Chạy vào 13:00 UTC (tức 20:00 tối giờ Việt Nam) vào các ngày 1, 3, 5, 26, 29 hàng tháng
     - cron: '0 13 1,3,5,26,29 * *'
-  workflow_dispatch: # Cho phép bấm nút "Run workflow" bằng tay ngay trên giao diện GitHub để test
+  workflow_dispatch:
 
 jobs:
   crawl-and-upload:
@@ -29,10 +28,10 @@ jobs:
           playwright install --with-deps chromium
 
       - name: 4. Nạp cấu hình .env từ GitHub Secrets
+        env:
+          RAW_ENV: ${{ secrets.DOTENV_CONTENT }}
         run: |
-          cat << 'EOF' > .env
-          ${{ secrets.DOTENV_CONTENT }}
-          EOF
+          python -c "import os, pathlib; pathlib.Path('.env').write_text(os.environ.get('RAW_ENV', '').strip() + '\n', encoding='utf-8')"
 
       - name: 5. Chạy Bot Săn Lịch và Lưu lên Google Drive
         env:
