@@ -93,6 +93,8 @@ def main():
     if not raw_cookie_str:
         raise RuntimeError("Thiếu biến môi trường FB_COOKIES trên GitHub Secrets!")
 
+    cookies = normalize_cookies(json.loads(raw_cookie_str))
+
     drive_keys = ("GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_REFRESH_TOKEN")
     missing_drive = [k for k in drive_keys if not os.environ.get(k)]
     use_drive = len(missing_drive) == 0
@@ -106,13 +108,34 @@ def main():
     context_state = ScanContext()
     targets = get_cloud_targets(lookback=2)
 
-    print(f"Khởi chạy Cloud Runner | Lưu Drive: {use_drive} | Các kỳ: {targets}")
+    print(f"Khởi chạy Cloud Runner với Browser CDP | Các kỳ: {targets}")
 
-    # Sử dụng trực tiếp facebook_session với custom debug port độc lập tránh xung đột asyncio loop trên Linux
-    cloud_debug_port = 9333
-    with facebook_session(cloud_debug_port, settings.output_dir) as fb:
-        runner = Runner(fb, stores, context=context_state)
-        results = runner.run(list(PUBLISHERS), targets=targets)
+    with sync_playwright() as p:
+        # Chủ động khởi chạy Chromium trên Linux với cổng debug để facebook_session kết nối qua CDP
+        browser = p.chromium.launch(
+            headless=True,
+            args=[
+                f"--remote-debugging-port={settings.debug_port}",
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-blink-features=AutomationControlled",
+            ],
+        )
+        ctx = browser.new_context(
+            viewport={"width": 1440, "height": 900},
+            locale="vi-VN",
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        )
+        ctx.add_cookies(cookies)
+        page = ctx.new_page()
+        page.goto("https://www.facebook.com/", wait_until="domcontentloaded", timeout=60000)
+
+        # Gọi facebook_session để điều khiển bot săn lịch
+        with facebook_session(settings.debug_port, settings.output_dir) as fb:
+            runner = Runner(fb, stores, context=context_state)
+            results = runner.run(list(PUBLISHERS), targets=targets)
+
+        browser.close()
 
     print("\n=== TỔNG KẾT CLOUD RUN ===")
     for r in results:
