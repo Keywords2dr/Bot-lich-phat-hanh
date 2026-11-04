@@ -94,6 +94,10 @@ def main():
         raise RuntimeError("Thiếu biến môi trường FB_COOKIES trên GitHub Secrets!")
 
     cookies = normalize_cookies(json.loads(raw_cookie_str))
+    loaded_names = {c["name"] for c in cookies}
+    print(f"[Chẩn đoán] Đọc được {len(cookies)} cookie từ FB_COOKIES | c_user={'c_user' in loaded_names} | xs={'xs' in loaded_names}")
+    if "c_user" not in loaded_names or "xs" not in loaded_names:
+        raise RuntimeError("FB_COOKIES thiếu c_user hoặc xs: hãy xuất lại cookie khi đã đăng nhập Facebook.")
 
     drive_keys = ("GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_REFRESH_TOKEN")
     missing_drive = [k for k in drive_keys if not os.environ.get(k)]
@@ -127,6 +131,16 @@ def main():
         ctx.add_cookies(cookies)
         page = ctx.new_page()
         page.goto("https://www.facebook.com/", wait_until="domcontentloaded", timeout=60000)
+        page.wait_for_timeout(3000)
+        alive = {c["name"] for c in ctx.cookies() if "facebook.com" in c.get("domain", "")}
+        print(f"[Chẩn đoán] URL sau khi vào: {page.url}")
+        print(f"[Chẩn đoán] Tiêu đề trang: {page.title()}")
+        print(f"[Chẩn đoán] Sau khi tải trang: c_user={'c_user' in alive} | xs={'xs' in alive}")
+        print(f"[Chẩn đoán] Có form đăng nhập: {bool(page.locator('input[name=\"pass\"]').count())}")
+        try:
+            page.screenshot(path=str(settings.output_dir / "debug_home.png"))
+        except Exception as exc:
+            print(f"[Chẩn đoán] Không chụp được màn hình: {exc}")
 
         fb = FacebookSession(page, ctx, settings.output_dir)
         runner = Runner(fb, stores, context=context_state)
