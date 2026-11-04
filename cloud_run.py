@@ -3,9 +3,10 @@ import os
 import re
 from datetime import date
 from pathlib import Path
+from playwright.sync_api import sync_playwright
 
 from lichbot.bootstrap import create_stores
-from lichbot.facebook import facebook_session
+from lichbot.facebook import FacebookClient
 from lichbot.policy import max_available_period
 from lichbot.publishers import PUBLISHERS
 from lichbot.runner import Runner
@@ -58,6 +59,31 @@ def get_cloud_targets(today=None, lookback=2):
     return targets
 
 
+def normalize_cookies(raw_cookies):
+    valid = []
+    for c in raw_cookies:
+        name = c.get("name")
+        value = c.get("value")
+        if not name or value is None:
+            continue
+        item = {
+            "name": str(name),
+            "value": str(value),
+            "domain": ".facebook.com",
+            "path": c.get("path", "/"),
+            "httpOnly": bool(c.get("httpOnly", False)),
+            "secure": True,
+        }
+        same_site = str(c.get("sameSite", "")).capitalize()
+        if same_site in ("Strict", "Lax", "None"):
+            item["sameSite"] = same_site
+        exp = c.get("expires") or c.get("expirationDate")
+        if isinstance(exp, (int, float)) and exp > 0:
+            item["expires"] = float(exp)
+        valid.append(item)
+    return valid
+
+
 def main():
     settings = Settings()
     settings.output_dir.mkdir(parents=True, exist_ok=True)
@@ -66,6 +92,8 @@ def main():
     raw_cookie_str = os.environ.get("FB_COOKIES", "").strip()
     if not raw_cookie_str:
         raise RuntimeError("Thiếu biến môi trường FB_COOKIES trên GitHub Secrets!")
+
+    cookies = normalize_cookies(json.loads(raw_cookie_str))
 
     drive_keys = ("GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_REFRESH_TOKEN")
     missing_drive = [k for k in drive_keys if not os.environ.get(k)]
@@ -80,11 +108,31 @@ def main():
     context_state = ScanContext()
     targets = get_cloud_targets(lookback=2)
 
-    print(f"Khởi chạy Cloud Runner | Lưu Drive: {use_drive} | Các kỳ: {targets}")
+    print(f"Khởi chạy Cloud Runner trực tiếp | Lưu Drive: {use_drive} | Các kỳ: {targets}")
 
-    with facebook_session(settings.debug_port, settings.output_dir) as fb:
+    with sync_playwright() as p:
+        browser = p.chromium.launch(
+            headless=True,
+            args=[
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-blink-features=AutomationControlled",
+            ],
+        )
+        ctx = browser.new_context(
+            viewport={"width": 1440, "height": 900},
+            locale="vi-VN",
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        )
+        ctx.add_cookies(cookies)
+        page = ctx.new_page()
+        page.goto("https://www.facebook.com/", wait_until="domcontentloaded", timeout=60000)
+
+        fb = FacebookClient(page, settings.output_dir)
         runner = Runner(fb, stores, context=context_state)
         results = runner.run(list(PUBLISHERS), targets=targets)
+
+        browser.close()
 
     print("\n=== TỔNG KẾT CLOUD RUN ===")
     for r in results:
