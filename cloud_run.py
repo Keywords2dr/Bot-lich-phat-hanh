@@ -148,10 +148,12 @@ def main():
         print(f"[Chẩn đoán] Tiêu đề trang: {page.title()}")
         print(f"[Chẩn đoán] Sau khi tải trang: c_user={'c_user' in alive} | xs={'xs' in alive}")
         print(f"[Chẩn đoán] Có form đăng nhập: {bool(page.locator('input[name=\"pass\"]').count())}")
-        try:
-            page.screenshot(path=str(settings.output_dir / "debug_home.png"))
-        except Exception as exc:
-            print(f"[Chẩn đoán] Không chụp được màn hình: {exc}")
+        session_dead = "c_user" not in alive or "xs" not in alive
+        if session_dead:
+            try:
+                page.screenshot(path=str(settings.output_dir / "debug_home.png"))
+            except Exception as exc:
+                print(f"[Chẩn đoán] Không chụp được màn hình: {exc}")
 
         fb = FacebookSession(page, ctx, settings.output_dir)
         runner = Runner(fb, stores, context=context_state)
