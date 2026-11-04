@@ -27,18 +27,13 @@ jobs:
           pip install -r requirements.txt
           playwright install --with-deps chromium
 
-      - name: 4. Nạp cấu hình secrets.env từ GitHub Secrets
+      - name: 4. Chạy Bot Săn Lịch và Lưu lên Google Drive
         env:
-          RAW_ENV: ${{ secrets.DOTENV_CONTENT }}
-        run: |
-          python -c "import os, pathlib; content = os.environ.get('RAW_ENV', '').strip() + '\n'; pathlib.Path('secrets.env').write_text(content, encoding='utf-8'); pathlib.Path('.env').write_text(content, encoding='utf-8')"
-
-      - name: 5. Chạy Bot Săn Lịch và Lưu lên Google Drive
-        env:
+          DOTENV_CONTENT: ${{ secrets.DOTENV_CONTENT }}
           FB_COOKIES: ${{ secrets.FB_COOKIES }}
         run: python cloud_run.py
 
-      - name: 6. Lưu trữ ảnh & ảnh chụp màn hình debug làm Artifacts trên GitHub (7 ngày)
+      - name: 5. Lưu trữ ảnh & ảnh chụp màn hình debug làm Artifacts trên GitHub (7 ngày)
         if: always()
         uses: actions/upload-artifact@v4
         with:
