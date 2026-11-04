@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import asyncio
 from datetime import date
 from pathlib import Path
 from playwright.sync_api import sync_playwright
@@ -85,6 +86,15 @@ def normalize_cookies(raw_cookies):
 
 
 def main():
+    # Vô hiệu hóa asyncio loop đang chạy ngầm để Playwright sync hoạt động ổn định trên Linux
+    try:
+        asyncio.set_event_loop_policy(asyncio.DefaultEventLoopPolicy())
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            loop.stop()
+    except Exception:
+        pass
+
     settings = Settings()
     settings.output_dir.mkdir(parents=True, exist_ok=True)
     load_all_env_sources(settings)
@@ -108,10 +118,9 @@ def main():
     context_state = ScanContext()
     targets = get_cloud_targets(lookback=2)
 
-    print(f"Khởi chạy Cloud Runner với Browser CDP | Các kỳ: {targets}")
+    print(f"Khởi chạy Cloud Runner | Các kỳ: {targets}")
 
     with sync_playwright() as p:
-        # Chủ động khởi chạy Chromium trên Linux với cổng debug để facebook_session kết nối qua CDP
         browser = p.chromium.launch(
             headless=True,
             args=[
@@ -130,7 +139,6 @@ def main():
         page = ctx.new_page()
         page.goto("https://www.facebook.com/", wait_until="domcontentloaded", timeout=60000)
 
-        # Gọi facebook_session để điều khiển bot săn lịch
         with facebook_session(settings.debug_port, settings.output_dir) as fb:
             runner = Runner(fb, stores, context=context_state)
             results = runner.run(list(PUBLISHERS), targets=targets)
