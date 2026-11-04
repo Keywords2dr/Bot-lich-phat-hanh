@@ -1,13 +1,12 @@
 import json
 import os
 import re
-import asyncio
 from datetime import date
 from pathlib import Path
 from playwright.sync_api import sync_playwright
 
 from lichbot.bootstrap import create_stores
-from lichbot.facebook import facebook_session
+from lichbot.facebook import FacebookSession
 from lichbot.policy import max_available_period
 from lichbot.publishers import PUBLISHERS
 from lichbot.runner import Runner
@@ -86,15 +85,6 @@ def normalize_cookies(raw_cookies):
 
 
 def main():
-    # Vô hiệu hóa asyncio loop đang chạy ngầm để Playwright sync hoạt động ổn định trên Linux
-    try:
-        asyncio.set_event_loop_policy(asyncio.DefaultEventLoopPolicy())
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            loop.stop()
-    except Exception:
-        pass
-
     settings = Settings()
     settings.output_dir.mkdir(parents=True, exist_ok=True)
     load_all_env_sources(settings)
@@ -124,7 +114,6 @@ def main():
         browser = p.chromium.launch(
             headless=True,
             args=[
-                f"--remote-debugging-port={settings.debug_port}",
                 "--no-sandbox",
                 "--disable-dev-shm-usage",
                 "--disable-blink-features=AutomationControlled",
@@ -139,9 +128,9 @@ def main():
         page = ctx.new_page()
         page.goto("https://www.facebook.com/", wait_until="domcontentloaded", timeout=60000)
 
-        with facebook_session(settings.debug_port, settings.output_dir) as fb:
-            runner = Runner(fb, stores, context=context_state)
-            results = runner.run(list(PUBLISHERS), targets=targets)
+        fb = FacebookSession(page, ctx, settings.output_dir)
+        runner = Runner(fb, stores, context=context_state)
+        results = runner.run(list(PUBLISHERS), targets=targets)
 
         browser.close()
 
