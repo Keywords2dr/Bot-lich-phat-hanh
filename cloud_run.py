@@ -115,18 +115,29 @@ def main():
     print(f"Khởi chạy Cloud Runner | Các kỳ: {targets}")
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(
-            headless=True,
-            args=[
-                "--no-sandbox",
-                "--disable-dev-shm-usage",
-                "--disable-blink-features=AutomationControlled",
-            ],
+        launch_args = [
+            "--no-sandbox",
+            "--disable-dev-shm-usage",
+            "--disable-blink-features=AutomationControlled",
+        ]
+        try:
+            browser = p.chromium.launch(channel="chrome", headless=True, args=launch_args)
+            print("[Chẩn đoán] Dùng Google Chrome thật của runner.")
+        except Exception as exc:
+            print(f"[Chẩn đoán] Không mở được Chrome thật ({exc}); dùng Chromium của Playwright.")
+            browser = p.chromium.launch(headless=True, args=launch_args)
+
+        user_agent = os.environ.get("FB_USER_AGENT", "").strip() or (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
         )
+        print(f"[Chẩn đoán] User-Agent: {user_agent}")
         ctx = browser.new_context(
             viewport={"width": 1440, "height": 900},
             locale="vi-VN",
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+            timezone_id="Asia/Ho_Chi_Minh",
+            user_agent=user_agent,
+            extra_http_headers={"Accept-Language": "vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7"},
         )
         ctx.add_cookies(cookies)
         page = ctx.new_page()
