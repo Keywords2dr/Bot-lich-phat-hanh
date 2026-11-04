@@ -1,10 +1,8 @@
 import json
 import os
 import re
-import time
 from datetime import date
 from pathlib import Path
-from playwright.sync_api import sync_playwright
 
 from lichbot.bootstrap import create_stores
 from lichbot.facebook import facebook_session
@@ -60,31 +58,6 @@ def get_cloud_targets(today=None, lookback=2):
     return targets
 
 
-def normalize_cookies(raw_cookies):
-    valid = []
-    for c in raw_cookies:
-        name = c.get("name")
-        value = c.get("value")
-        if not name or value is None:
-            continue
-        item = {
-            "name": str(name),
-            "value": str(value),
-            "domain": ".facebook.com",
-            "path": c.get("path", "/"),
-            "httpOnly": bool(c.get("httpOnly", False)),
-            "secure": True,
-        }
-        same_site = str(c.get("sameSite", "")).capitalize()
-        if same_site in ("Strict", "Lax", "None"):
-            item["sameSite"] = same_site
-        exp = c.get("expires") or c.get("expirationDate")
-        if isinstance(exp, (int, float)) and exp > 0:
-            item["expires"] = float(exp)
-        valid.append(item)
-    return valid
-
-
 def main():
     settings = Settings()
     settings.output_dir.mkdir(parents=True, exist_ok=True)
@@ -92,51 +65,28 @@ def main():
 
     raw_cookie_str = os.environ.get("FB_COOKIES", "").strip()
     if not raw_cookie_str:
-        raise RuntimeError("Thieu bien moi truong FB_COOKIES tren GitHub Secrets!")
+        raise RuntimeError("Thiếu biến môi trường FB_COOKIES trên GitHub Secrets!")
 
-    cookies = normalize_cookies(json.loads(raw_cookie_str))
     drive_keys = ("GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_REFRESH_TOKEN")
     missing_drive = [k for k in drive_keys if not os.environ.get(k)]
     use_drive = len(missing_drive) == 0
 
     if not use_drive:
-        print(f"[Canh bao] Thieu bien Google Drive {missing_drive} -> Chi luu vao GitHub Artifacts.")
+        print(f"[Cảnh báo] Thiếu biến Google Drive {missing_drive} -> Chỉ lưu vào GitHub Artifacts.")
     else:
-        print(f"Da ket noi du 3 khoa Google Drive! Thu muc Drive: '{settings.drive_root_folder}'")
+        print(f"Đã kết nối đủ 3 khóa Google Drive! Thư mục Drive: '{settings.drive_root_folder}'")
 
     stores = create_stores(settings, use_local=True, use_drive=use_drive)
     context_state = ScanContext()
     targets = get_cloud_targets(lookback=2)
 
-    print(f"Khoi chay Cloud Runner | Luu Drive: {use_drive} | Cac ky: {targets}")
+    print(f"Khởi chạy Cloud Runner | Lưu Drive: {use_drive} | Các kỳ: {targets}")
 
-    with sync_playwright() as p:
-        browser = p.chromium.launch(
-            headless=True,
-            args=[
-                f"--remote-debugging-port={settings.debug_port}",
-                "--no-sandbox",
-                "--disable-dev-shm-usage",
-                "--disable-blink-features=AutomationControlled",
-            ],
-        )
-        ctx = browser.new_context(
-            viewport={"width": 1440, "height": 900},
-            locale="vi-VN",
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-        )
-        ctx.add_cookies(cookies)
-        page = ctx.new_page()
-        page.goto("https://www.facebook.com/", wait_until="domcontentloaded", timeout=60000)
-        time.sleep(4)
+    with facebook_session(settings.debug_port, settings.output_dir) as fb:
+        runner = Runner(fb, stores, context=context_state)
+        results = runner.run(list(PUBLISHERS), targets=targets)
 
-        with facebook_session(settings.debug_port, settings.output_dir) as fb:
-            runner = Runner(fb, stores, context=context_state)
-            results = runner.run(list(PUBLISHERS), targets=targets)
-
-        browser.close()
-
-    print("\n=== TONG KET CLOUD RUN ===")
+    print("\n=== TỔNG KẾT CLOUD RUN ===")
     for r in results:
         print(f"{r.publisher:10} | {r.target} | {r.status.value:14} | {r.message}")
 
