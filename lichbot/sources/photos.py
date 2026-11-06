@@ -41,7 +41,7 @@ class PhotosSource(PosterSource):
                 state["next_idx"] = idx + 1
             page = fb.open_photo(href)
             month = (
-                identify_photo_month(page.text, page.months, img_bytes=page.data, today=self._today)
+                identify_photo_month(page.text, page.months, img_bytes=page.image_bytes, today=self._today)
                 if page
                 else None
             )
@@ -92,7 +92,7 @@ class PhotosSource(PosterSource):
             if not next_page or not has_all(next_page.text, keys):
                 continue
             next_m = identify_photo_month(
-                next_page.text, next_page.months, img_bytes=next_page.data, today=self._today
+                next_page.text, next_page.months, img_bytes=next_page.image_bytes, today=self._today
             )
             if not next_m:
                 continue

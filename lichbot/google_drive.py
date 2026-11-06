@@ -18,20 +18,36 @@ def get_service():
     return build("drive", "v3", credentials=creds, cache_discovery=False)
 
 
-def get_or_create_folder(service, name, parent="root"):
+FOLDER_MIME = "application/vnd.google-apps.folder"
+
+
+def escape_q(value):
+    return str(value).replace("\\", "\\\\").replace("'", "\\'")
+
+
+def find_folder(service, name, parent="root"):
     q = (
-        f"name='{name}' and '{parent}' in parents "
-        "and mimeType='application/vnd.google-apps.folder' and trashed=false"
+        f"name='{escape_q(name)}' and '{parent}' in parents "
+        f"and mimeType='{FOLDER_MIME}' and trashed=false"
     )
     res = service.files().list(q=q, fields="files(id)").execute()
-    if res["files"]:
-        return res["files"][0]["id"]
-    meta = {
-        "name": name,
-        "mimeType": "application/vnd.google-apps.folder",
-        "parents": [parent],
-    }
+    return res["files"][0]["id"] if res["files"] else None
+
+
+def create_folder(service, name, parent="root"):
+    meta = {"name": name, "mimeType": FOLDER_MIME, "parents": [parent]}
     return service.files().create(body=meta, fields="id").execute()["id"]
+
+
+def get_or_create_folder(service, name, parent="root"):
+    return find_folder(service, name, parent) or create_folder(service, name, parent)
+
+
+def find_file(service, folder_id, names):
+    cond = " or ".join(f"name='{escape_q(n)}'" for n in names)
+    q = f"'{folder_id}' in parents and trashed=false and ({cond})"
+    res = service.files().list(q=q, fields="files(id)").execute()
+    return res["files"][0]["id"] if res["files"] else None
 
 
 def upload(service, folder_id, filename, data, mime):

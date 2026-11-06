@@ -5,7 +5,7 @@ from .publishers import PUBLISHERS
 from .runner import Runner
 from .scan_context import ScanContext
 from .settings import Settings, load_env, missing_env
-from .storage import DedupStore, DriveStore, LocalStore
+from .storage import DedupStore, DriveStore, LocalStore, make_skip_check
 
 
 def create_stores(settings, use_local=True, use_drive=True):
@@ -35,6 +35,7 @@ def run_pipeline(
     use_drive=True,
     should_stop=None,
     on_chrome=None,
+    skip_existing=False,
 ):
     settings = Settings()
     load_env(settings.env_file)
@@ -49,5 +50,6 @@ def run_pipeline(
         if on_chrome:
             on_chrome(launcher)
         with facebook_session(settings.debug_port, settings.output_dir) as fb:
-            runner = Runner(fb, stores, context=context, should_stop=should_stop)
+            skip_check = make_skip_check(stores) if skip_existing else None
+            runner = Runner(fb, stores, context=context, should_stop=should_stop, skip_check=skip_check)
             return runner.run(publishers, kinds=kinds, targets=targets)

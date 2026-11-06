@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 
 
@@ -28,10 +28,19 @@ class Publisher:
 class PhotoPage:
     text: str
     months: tuple
-    data: bytes
+    data: bytes | None
     ext: str
     width: int
     height: int
+    loader: object = field(default=None, repr=False, compare=False)
+
+    def image_bytes(self):
+        """Trả về dữ liệu ảnh; nếu chưa tải thì gọi loader (trả về (bytes, ext)) đúng một lần."""
+        if self.data is None and self.loader is not None:
+            data, ext = self.loader()
+            object.__setattr__(self, "data", data)
+            object.__setattr__(self, "ext", ext)
+        return self.data
 
 
 @dataclass(frozen=True)

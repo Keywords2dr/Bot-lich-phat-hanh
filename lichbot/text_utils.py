@@ -127,7 +127,11 @@ def identify_photo_month(text, months, img_bytes=None, today=None):
     if m:
         return m
     if img_bytes:
-        ocr_m = ocr_image_month(img_bytes)
+        try:
+            data = img_bytes() if callable(img_bytes) else img_bytes
+        except Exception:
+            data = None
+        ocr_m = ocr_image_month(data) if data else None
         if ocr_m:
             return ocr_m
     return infer_month_from_post_date(caption, today=today)

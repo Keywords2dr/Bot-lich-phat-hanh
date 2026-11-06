@@ -19,6 +19,7 @@ class Runner:
         source_factory=build_sources,
         context=None,
         should_stop=None,
+        skip_check=None,
     ):
         self._session = session
         self._stores = stores
@@ -27,6 +28,7 @@ class Runner:
         self._build_sources = source_factory
         self._ctx = context or ScanContext()
         self._should_stop = should_stop or (lambda: False)
+        self._skip_check = skip_check
 
     def _interruptible_sleep(self, seconds):
         if self._sleep is not time.sleep:
@@ -42,21 +44,34 @@ class Runner:
         all_targets = targets if targets is not None else [target]
         results = []
 
-        for index, publisher in enumerate(publishers):
+        scraped_any = False
+        for publisher in publishers:
             if self._should_stop():
                 print("\n[DA HUY] Tien trinh da dung theo yeu cau nguoi dung.")
                 break
 
-            if index > 0:
+            skipped = {t for t in all_targets if t and self._skip_check and self._skip_check(publisher.name, t)}
+            if len(skipped) == len(all_targets):
+                for t in all_targets:
+                    print(f"[BO QUA] {publisher.name} {t}: da co san, khong can quet lai")
+                    results.append(RunResult(publisher.name, t, RunStatus.SUCCESS, "da co san, bo qua quet"))
+                continue
+
+            if scraped_any:
                 delay = random.uniform(10, 20)
                 print(f"\n[Nghi giua cac NXB: {delay:.1f}s de giu an toan tai khoan...]")
                 self._interruptible_sleep(delay)
                 if self._should_stop():
                     print("\n[DA HUY] Da dung trong luc nghi giua cac NXB.")
                     break
+            scraped_any = True
 
             print("\n=== " + publisher.name + " ===")
             for t in all_targets:
+                if t in skipped:
+                    print(f"[BO QUA] Ky {t}: da co san, khong can quet lai")
+                    results.append(RunResult(publisher.name, t, RunStatus.SUCCESS, "da co san, bo qua quet"))
+                    continue
                 if self._should_stop():
                     print(f"[DA HUY] Bo qua ky {t} do nguoi dung da bam dung.")
                     break

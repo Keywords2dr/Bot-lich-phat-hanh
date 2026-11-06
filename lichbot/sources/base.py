@@ -23,10 +23,11 @@ class PosterSource(ABC):
         ...
 
     def _poster(self, year, month, page):
+        data = page.image_bytes()
         return Poster(
             year=year,
             month=month,
-            data=page.data,
+            data=data,
             ext=page.ext,
             width=page.width,
             height=page.height,

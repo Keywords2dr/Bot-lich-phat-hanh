@@ -12,6 +12,7 @@ from lichbot.publishers import PUBLISHERS
 from lichbot.runner import Runner
 from lichbot.scan_context import ScanContext
 from lichbot.settings import Settings, load_env
+from lichbot.storage import make_skip_check
 
 
 def parse_env_text(raw_text: str):
@@ -156,7 +157,11 @@ def main():
                 print(f"[Chẩn đoán] Không chụp được màn hình: {exc}")
 
         fb = FacebookSession(page, ctx, settings.output_dir)
-        runner = Runner(fb, stores, context=context_state)
+        force = os.environ.get("FORCE_RESCAN", "").strip().lower() in ("1", "true", "yes")
+        skip_check = None if force else make_skip_check(stores)
+        if force:
+            print("[Cấu hình] FORCE_RESCAN bật: quét lại tất cả, không bỏ qua kỳ đã có trên Drive.")
+        runner = Runner(fb, stores, context=context_state, skip_check=skip_check)
         results = runner.run(list(PUBLISHERS), targets=targets)
 
         browser.close()

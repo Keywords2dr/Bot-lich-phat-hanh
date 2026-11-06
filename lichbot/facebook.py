@@ -3,7 +3,7 @@ import re
 import time
 from contextlib import contextmanager
 
-from .models import LoginError, PhotoPage
+from .models import BotError, LoginError, PhotoPage
 from .text_utils import extract_months, fold
 
 LOGIN_MSG = "Chua dang nhap Facebook trong Chrome cua bot. Hay dang nhap roi chay lai."
@@ -148,6 +148,17 @@ class FacebookSession:
             print(f"Bo qua chup man hinh debug ({type(err).__name__})")
         return path
 
+    def _image_loader(self, src):
+        def load():
+            response = self._ctx.request.get(src)
+            if not response.ok:
+                raise BotError(f"Khong tai duoc anh (HTTP {response.status})")
+            content_type = response.headers.get("content-type", "image/jpeg")
+            ext = "png" if "png" in content_type else "webp" if "webp" in content_type else "jpg"
+            return response.body(), ext
+
+        return load
+
     def open_photo(self, href):
         m = FBID_RE.search(href)
         cache_key = m.group(1) if m else href
@@ -169,16 +180,14 @@ class FacebookSession:
             return None
         images.sort(key=lambda i: i["w"] * i["h"], reverse=True)
         best = images[0]
-        response = self._ctx.request.get(best["src"])
-        content_type = response.headers.get("content-type", "image/jpeg")
-        ext = "png" if "png" in content_type else "webp" if "webp" in content_type else "jpg"
         result = PhotoPage(
             text=text,
             months=tuple(extract_months(text)),
-            data=response.body(),
-            ext=ext,
+            data=None,
+            ext="jpg",
             width=best["w"],
             height=best["h"],
+            loader=self._image_loader(best["src"]),
         )
         self._photo_cache[cache_key] = result
         return result

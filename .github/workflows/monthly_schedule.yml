@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: '0 13 1,3,5,26,29 * *'
   workflow_dispatch:
+    inputs:
+      force_rescan:
+        description: 'Quét lại tất cả, kể cả kỳ đã có trên Drive'
+        type: boolean
+        default: false
 
 jobs:
   crawl-and-upload:
@@ -31,6 +36,7 @@ jobs:
         env:
           DOTENV_CONTENT: ${{ secrets.DOTENV_CONTENT }}
           FB_COOKIES: ${{ secrets.FB_COOKIES }}
+          FORCE_RESCAN: ${{ inputs.force_rescan }}
         run: python cloud_run.py
 
       - name: 5. Lưu trữ ảnh & ảnh chụp màn hình debug làm Artifacts trên GitHub (7 ngày)
