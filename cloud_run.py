@@ -1,12 +1,14 @@
 import json
 import os
 import re
+import sys
 from datetime import date
 from pathlib import Path
 from playwright.sync_api import sync_playwright
 
 from lichbot.bootstrap import create_stores
 from lichbot.facebook import FacebookSession
+from lichbot.models import RunStatus
 from lichbot.policy import max_available_period
 from lichbot.publishers import PUBLISHERS
 from lichbot.runner import Runner
@@ -115,6 +117,17 @@ def main():
 
     print(f"Khởi chạy Cloud Runner | Các kỳ: {targets}")
 
+    force = os.environ.get("FORCE_RESCAN", "").strip().lower() in ("1", "true", "yes")
+    skip_check = None if force else make_skip_check(stores)
+    if force:
+        print("[Cấu hình] FORCE_RESCAN bật: quét lại tất cả, không bỏ qua kỳ đã có trên Drive.")
+    if skip_check:
+        pending = [(p.name, t) for p in PUBLISHERS for t in targets if not skip_check(p.name, t)]
+        if not pending:
+            print("Tất cả các kỳ đã có trên Drive, không cần mở Facebook. Kết thúc.")
+            return
+        print(f"Còn {len(pending)} kỳ cần quét: {pending}")
+
     with sync_playwright() as p:
         launch_args = [
             "--no-sandbox",
@@ -155,12 +168,14 @@ def main():
                 page.screenshot(path=str(settings.output_dir / "debug_home.png"))
             except Exception as exc:
                 print(f"[Chẩn đoán] Không chụp được màn hình: {exc}")
+            browser.close()
+            print(
+                "\n[LỖI] Facebook không công nhận phiên đăng nhập (cookie hết hạn hoặc bị hủy). "
+                "Hãy xuất cookie mới bằng export_cookies.py và cập nhật secret FB_COOKIES."
+            )
+            sys.exit(1)
 
         fb = FacebookSession(page, ctx, settings.output_dir)
-        force = os.environ.get("FORCE_RESCAN", "").strip().lower() in ("1", "true", "yes")
-        skip_check = None if force else make_skip_check(stores)
-        if force:
-            print("[Cấu hình] FORCE_RESCAN bật: quét lại tất cả, không bỏ qua kỳ đã có trên Drive.")
         runner = Runner(fb, stores, context=context_state, skip_check=skip_check)
         results = runner.run(list(PUBLISHERS), targets=targets)
 
@@ -169,6 +184,10 @@ def main():
     print("\n=== TỔNG KẾT CLOUD RUN ===")
     for r in results:
         print(f"{r.publisher:10} | {r.target} | {r.status.value:14} | {r.message}")
+
+    if any(r.status == RunStatus.ERROR for r in results):
+        print("\n[LỖI] Có kỳ bị ERROR (xem bảng trên): đánh dấu workflow thất bại để bạn được báo.")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

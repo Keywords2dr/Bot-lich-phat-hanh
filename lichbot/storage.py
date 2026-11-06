@@ -167,6 +167,7 @@ def make_skip_check(stores):
         if key not in memo:
             try:
                 memo[key] = all(s.has(publisher, period) for s in checkers)
+                print(f"[Kiem tra Drive] {publisher} {period}: {'da co' if memo[key] else 'chua co'}")
             except Exception as error:
                 print(f"Khong kiem tra duoc {publisher} {period} ({type(error).__name__}), se quet nhu binh thuong")
                 memo[key] = False
