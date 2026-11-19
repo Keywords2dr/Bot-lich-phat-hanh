@@ -369,7 +369,6 @@ class ApifyPhotosAlbumSource(_BaseApifySource):
                 )
                 if exact or merged:
                     candidates.append((has_explicit_month, ts, -idx, wy, wm, item))
-                    # Nếu đã có ảnh ghi rõ tháng trong caption ở đầu danh sách thì không cần lùi sâu thêm
                     if has_explicit_month and newest_first:
                         break
                     continue
@@ -392,8 +391,6 @@ class ApifyPhotosAlbumSource(_BaseApifySource):
 
         if not candidates:
             return None
-
-        # Ưu tiên ảnh có ghi rõ tháng trong caption (giống _find_better_in_cluster của photos.py), sau đó mới nhất
         candidates.sort(key=lambda c: (c[0], c[3], c[4], c[1], c[2]), reverse=True)
         _, _, _, year, month, item = candidates[0]
         return self._build_poster(year, month, item)
