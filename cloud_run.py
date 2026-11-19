@@ -1,19 +1,17 @@
-import json
 import os
 import re
 import sys
 from datetime import date
 from pathlib import Path
-from playwright.sync_api import sync_playwright
 
 from lichbot.bootstrap import create_stores
-from lichbot.facebook import FacebookSession
 from lichbot.models import RunStatus
 from lichbot.policy import max_available_period
 from lichbot.publishers import PUBLISHERS
 from lichbot.runner import Runner
 from lichbot.scan_context import ScanContext
 from lichbot.settings import Settings, load_env
+from lichbot.sources.apify_fb import ApifySession, build_apify_sources
 from lichbot.storage import make_skip_check
 
 
@@ -62,45 +60,14 @@ def get_cloud_targets(today=None, lookback=2):
     return targets
 
 
-def normalize_cookies(raw_cookies):
-    valid = []
-    for c in raw_cookies:
-        name = c.get("name")
-        value = c.get("value")
-        if not name or value is None:
-            continue
-        item = {
-            "name": str(name),
-            "value": str(value),
-            "domain": ".facebook.com",
-            "path": c.get("path", "/"),
-            "httpOnly": bool(c.get("httpOnly", False)),
-            "secure": True,
-        }
-        same_site = str(c.get("sameSite", "")).capitalize()
-        if same_site in ("Strict", "Lax", "None"):
-            item["sameSite"] = same_site
-        exp = c.get("expires") or c.get("expirationDate")
-        if isinstance(exp, (int, float)) and exp > 0:
-            item["expires"] = float(exp)
-        valid.append(item)
-    return valid
-
-
 def main():
     settings = Settings()
     settings.output_dir.mkdir(parents=True, exist_ok=True)
     load_all_env_sources(settings)
 
-    raw_cookie_str = os.environ.get("FB_COOKIES", "").strip()
-    if not raw_cookie_str:
-        raise RuntimeError("Thiếu biến môi trường FB_COOKIES trên GitHub Secrets!")
-
-    cookies = normalize_cookies(json.loads(raw_cookie_str))
-    loaded_names = {c["name"] for c in cookies}
-    print(f"[Chẩn đoán] Đọc được {len(cookies)} cookie từ FB_COOKIES | c_user={'c_user' in loaded_names} | xs={'xs' in loaded_names}")
-    if "c_user" not in loaded_names or "xs" not in loaded_names:
-        raise RuntimeError("FB_COOKIES thiếu c_user hoặc xs: hãy xuất lại cookie khi đã đăng nhập Facebook.")
+    apify_token = os.environ.get("APIFY_TOKEN", "").strip()
+    if not apify_token:
+        raise RuntimeError("Thiếu biến môi trường APIFY_TOKEN trên GitHub Secrets hoặc .env!")
 
     drive_keys = ("GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_REFRESH_TOKEN")
     missing_drive = [k for k in drive_keys if not os.environ.get(k)]
@@ -115,7 +82,7 @@ def main():
     context_state = ScanContext()
     targets = get_cloud_targets(lookback=2)
 
-    print(f"Khởi chạy Cloud Runner | Các kỳ: {targets}")
+    print(f"Khởi chạy Cloud Runner (Apify API) | Các kỳ: {targets}")
 
     force = os.environ.get("FORCE_RESCAN", "").strip().lower() in ("1", "true", "yes")
     skip_check = None if force else make_skip_check(stores)
@@ -124,62 +91,27 @@ def main():
     if skip_check:
         pending = [(p.name, t) for p in PUBLISHERS for t in targets if not skip_check(p.name, t)]
         if not pending:
-            print("Tất cả các kỳ đã có trên Drive, không cần mở Facebook. Kết thúc.")
+            print("Tất cả các kỳ đã có trên Drive, không cần gọi Apify. Kết thúc.")
             return
         print(f"Còn {len(pending)} kỳ cần quét: {pending}")
 
-    with sync_playwright() as p:
-        launch_args = [
-            "--no-sandbox",
-            "--disable-dev-shm-usage",
-            "--disable-blink-features=AutomationControlled",
-        ]
-        try:
-            browser = p.chromium.launch(channel="chrome", headless=True, args=launch_args)
-            print("[Chẩn đoán] Dùng Google Chrome thật của runner.")
-        except Exception as exc:
-            print(f"[Chẩn đoán] Không mở được Chrome thật ({exc}); dùng Chromium của Playwright.")
-            browser = p.chromium.launch(headless=True, args=launch_args)
+    results_limit = int(os.environ.get("APIFY_RESULTS_LIMIT", "50" if force else "35"))
+    days_back = int(os.environ.get("APIFY_DAYS_BACK", "75"))
 
-        user_agent = os.environ.get("FB_USER_AGENT", "").strip() or (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-            "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-        )
-        print(f"[Chẩn đoán] User-Agent: {user_agent}")
-        ctx = browser.new_context(
-            viewport={"width": 1440, "height": 900},
-            locale="vi-VN",
-            timezone_id="Asia/Ho_Chi_Minh",
-            user_agent=user_agent,
-            extra_http_headers={"Accept-Language": "vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7"},
-        )
-        ctx.add_cookies(cookies)
-        page = ctx.new_page()
-        page.goto("https://www.facebook.com/", wait_until="domcontentloaded", timeout=60000)
-        page.wait_for_timeout(3000)
-        alive = {c["name"] for c in ctx.cookies() if "facebook.com" in c.get("domain", "")}
-        print(f"[Chẩn đoán] URL sau khi vào: {page.url}")
-        print(f"[Chẩn đoán] Tiêu đề trang: {page.title()}")
-        print(f"[Chẩn đoán] Sau khi tải trang: c_user={'c_user' in alive} | xs={'xs' in alive}")
-        print(f"[Chẩn đoán] Có form đăng nhập: {bool(page.locator('input[name=\"pass\"]').count())}")
-        session_dead = "c_user" not in alive or "xs" not in alive
-        if session_dead:
-            try:
-                page.screenshot(path=str(settings.output_dir / "debug_home.png"))
-            except Exception as exc:
-                print(f"[Chẩn đoán] Không chụp được màn hình: {exc}")
-            browser.close()
-            print(
-                "\n[LỖI] Facebook không công nhận phiên đăng nhập (cookie hết hạn hoặc bị hủy). "
-                "Hãy xuất cookie mới bằng export_cookies.py và cập nhật secret FB_COOKIES."
-            )
-            sys.exit(1)
-
-        fb = FacebookSession(page, ctx, settings.output_dir)
-        runner = Runner(fb, stores, context=context_state, skip_check=skip_check)
-        results = runner.run(list(PUBLISHERS), targets=targets)
-
-        browser.close()
+    session = ApifySession(
+        token=apify_token,
+        results_limit=results_limit,
+        days_back=days_back,
+    )
+    runner = Runner(
+        session,
+        stores,
+        sleep=lambda _: None,  # Không cần nghỉ 10-20s như khi dùng trình duyệt Facebook thật
+        source_factory=build_apify_sources,
+        context=context_state,
+        skip_check=skip_check,
+    )
+    results = runner.run(list(PUBLISHERS), targets=targets)
 
     print("\n=== TỔNG KẾT CLOUD RUN ===")
     for r in results:

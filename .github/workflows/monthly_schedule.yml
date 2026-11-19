@@ -30,16 +30,15 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y tesseract-ocr tesseract-ocr-vie
           pip install -r requirements.txt
-          playwright install --with-deps chromium
 
       - name: 4. Chạy Bot Săn Lịch và Lưu lên Google Drive
         env:
           DOTENV_CONTENT: ${{ secrets.DOTENV_CONTENT }}
-          FB_COOKIES: ${{ secrets.FB_COOKIES }}
+          APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
           FORCE_RESCAN: ${{ inputs.force_rescan }}
         run: python cloud_run.py
 
-      - name: 5. Lưu trữ ảnh & ảnh chụp màn hình debug làm Artifacts trên GitHub (7 ngày)
+      - name: 5. Lưu trữ ảnh & log tải về làm Artifacts trên GitHub (7 ngày)
         if: always()
         uses: actions/upload-artifact@v4
         with:
