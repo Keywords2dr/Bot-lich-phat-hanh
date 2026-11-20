@@ -40,10 +40,14 @@ def load_all_env_sources(settings: Settings):
     if raw_secret_env:
         parse_env_text(raw_secret_env)
 
-    for p in (settings.env_file, Path("secrets.env"), Path(".env")):
-        if p.exists():
-            load_env(p)
-            parse_env_text(p.read_text(encoding="utf-8"))
+    seen = set()
+    for p in (settings.env_file, Path(".env")):
+        resolved = p.resolve()
+        if resolved in seen or not p.exists():
+            continue
+        seen.add(resolved)
+        load_env(p)
+        parse_env_text(p.read_text(encoding="utf-8"))
 
 
 def get_cloud_targets(today=None, lookback=2):
@@ -106,7 +110,7 @@ def main():
     runner = Runner(
         session,
         stores,
-        sleep=lambda _: None,  # Không cần nghỉ 10-20s như khi dùng trình duyệt Facebook thật
+        sleep=lambda _: None,
         source_factory=build_apify_sources,
         context=context_state,
         skip_check=skip_check,

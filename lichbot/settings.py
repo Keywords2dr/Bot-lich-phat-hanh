@@ -12,7 +12,7 @@ class Settings:
     debug_port: int = 9222
     output_dir: Path = BASE_DIR / "fb_downloads"
     drive_root_folder: str = "Lich phat hanh"
-    env_file: Path = BASE_DIR / "secrets.env"
+    env_file: Path = BASE_DIR / ".env"
     required_env: tuple = (
         "GOOGLE_CLIENT_ID",
         "GOOGLE_CLIENT_SECRET",
