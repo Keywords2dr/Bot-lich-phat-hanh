@@ -3,7 +3,7 @@ from .models import Publisher
 KIM_DONG_HASHTAG = "https://www.facebook.com/hashtag/lich_phat_hanh_comick%C4%91"
 IPM_ALBUM = "https://www.facebook.com/media/set/?set=a.452839023556014&type=3"
 IPM_HASHTAG = "https://www.facebook.com/hashtag/thang_nay_ipm_co_gi"
-TRE_HASHTAG = "https://www.facebook.com/hashtag/lichphathanh"
+NXBTRE_WEB_URL = "https://www.nxbtre.com.vn/thong-tin/lich-phat-hanh-sach/"
 AMAK_ALBUM = "https://www.facebook.com/media/set/?set=a.488898269917289&type=3"
 
 PUBLISHERS = (
@@ -46,9 +46,7 @@ PUBLISHERS = (
         name="NXB-Tre",
         slug="truyentranhnxbtre",
         sources=(
-            {"type": "featured", "required_keys": ["lich phat hanh"]},
-            {"type": "album", "keys": ["lich phat hanh"]},
-            {"type": "hashtag", "url": TRE_HASHTAG, "text_key": "nxb tre"},
+            {"type": "nxbtre_web", "url": NXBTRE_WEB_URL},
         ),
     ),
     Publisher(

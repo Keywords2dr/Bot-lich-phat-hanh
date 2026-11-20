@@ -19,12 +19,14 @@ from ..text_utils import (
     resolve_year,
 )
 from .base import PosterSource
+from .nxbtre_web import NxbTreWebSource
 
 VN_TZ = timezone(timedelta(hours=7))
 APIFY_PHOTOS_ACTOR_URL = (
     "https://api.apify.com/v2/acts/automation_craft~facebook-photos-scraper/"
     "run-sync-get-dataset-items"
 )
+YEAR_IN_TITLE_RE = re.compile(r"\b20\d\d\b")
 
 _TESSERACT_CONFIGURED = False
 
@@ -83,8 +85,6 @@ def _photo_text(item: dict) -> str:
 
 
 class ApifySession:
-    """Gọi automation_craft~facebook-photos-scraper để tự dò Album theo năm và lấy ảnh kèm caption."""
-
     def __init__(
         self,
         token: str,
@@ -209,12 +209,7 @@ class _BaseApifySource(PosterSource):
         )
 
 
-YEAR_IN_TITLE_RE = re.compile(r"\b20\d\d\b")
-
-
 class ApifyYearlyAlbumSource(_BaseApifySource):
-    """Tự động tìm Album theo từ khóa + năm, hỗ trợ cả album tổng hợp không ghi năm."""
-
     kind = "apify_album"
 
     def supports(self, target):
@@ -228,13 +223,11 @@ class ApifyYearlyAlbumSource(_BaseApifySource):
         keys = [fold(k) for k in self._opts.get("keys", ["lich phat hanh"])]
         albums = self._fb.list_page_albums(self._publisher.slug)
 
-        # Ưu tiên 1: Album ghi rõ năm mục tiêu
         for album in albums:
             title = fold(album.get("title") or "")
             if all(k in title for k in keys) and str(year) in title:
                 return album, True
 
-        # Ưu tiên 2: Album tổng hợp không ghi năm
         for album in albums:
             title = fold(album.get("title") or "")
             if all(k in title for k in keys) and not YEAR_IN_TITLE_RE.search(title):
@@ -310,9 +303,8 @@ class ApifyYearlyAlbumSource(_BaseApifySource):
         best = latest_all[0]
         return self._build_poster(best[0], best[1], best[5])
 
-class ApifyPhotosAlbumSource(_BaseApifySource):
-    """Quét trực tiếp Album tổng hợp nhiều năm như IPM_ALBUM, AMAK_ALBUM (giống photos.py)."""
 
+class ApifyPhotosAlbumSource(_BaseApifySource):
     kind = "apify_photos"
 
     def fetch(self, target):
@@ -397,9 +389,17 @@ class ApifyPhotosAlbumSource(_BaseApifySource):
 
 
 def build_apify_sources(session, publisher, today, kinds=None, context=None):
+    allowed = set(kinds) if kinds else None
     sources = []
     for options in publisher.sources:
         kind = options.get("type")
+        if kind == "nxbtre_web":
+            sources.append(
+                NxbTreWebSource(session, publisher, options, today, context=context)
+            )
+            continue
+        if allowed and kind not in allowed:
+            continue
         if kind == "album":
             sources.append(
                 ApifyYearlyAlbumSource(session, publisher, options, today, context=context)
